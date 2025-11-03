@@ -6,7 +6,7 @@ Models:
   2. BiLSTM (Uncentered)
   3. BiLSTM (Centered)
   4. CNN-BiLSTM (Uncentered Hybrid)
-  5. Transformer (Fine-tuned DistilRoBERTa from checkpoint)
+  5. Transformer (Fine-tuned DistilRoBERTa from Hugging Face Hub)
 
 Supports: Python, Java, JavaScript, and Combined ("all")
 """
@@ -15,13 +15,18 @@ import streamlit as st
 import torch, joblib, numpy as np
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# -------------------- CONFIG --------------------
+# ----------------------------------------------------------
+# CONFIG
+# ----------------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+HF_MODEL_REPO = "nurbek/semantic-segmentation-transformer"  # <── replace with your HF repo name
 st.set_page_config(page_title="Multi-language Code Segmentation", layout="wide")
 st.title("🔍 Multi-language Code Segmentation Comparison")
 st.caption("Compare segmentation predictions across Python, Java, JavaScript, and Combined datasets using five models.")
 
-# -------------------- HELPERS --------------------
+# ----------------------------------------------------------
+# HELPERS
+# ----------------------------------------------------------
 def highlight_segments(code, probs, threshold=0.5):
     """Highlight predicted segmentation boundaries."""
     highlighted = ""
@@ -37,10 +42,11 @@ def char_tensor(code):
     return torch.tensor([ord(c) if ord(c) < 256 else 0 for c in code],
                         dtype=torch.long).unsqueeze(0).to(DEVICE)
 
-# -------------------- MODEL LOADING --------------------
+# ----------------------------------------------------------
+# MODEL LOADING
+# ----------------------------------------------------------
 @st.cache_resource
 def load_models(lang):
-    """Load models for the selected language."""
     models = {}
     suffix = lang.lower()
 
@@ -80,16 +86,15 @@ def load_models(lang):
     except:
         models["cnn_bilstm"] = None
 
-    # 5️⃣ Transformer (Fine-tuned DistilRoBERTa checkpoint)
+    # 5️⃣ Transformer (Fine-tuned from Hugging Face)
     try:
-        model_path = "runs/transformer_centered/checkpoint-2500"
-        st.info(f"[INFO] Loading fine-tuned Transformer from {model_path}")
+        st.info(f"[INFO] Loading fine-tuned Transformer from Hugging Face Hub → {HF_MODEL_REPO}")
         tokenizer = AutoTokenizer.from_pretrained("distilroberta-base")
-        transformer = AutoModelForSequenceClassification.from_pretrained(model_path).to(DEVICE)
+        transformer = AutoModelForSequenceClassification.from_pretrained(HF_MODEL_REPO).to(DEVICE)
         transformer.eval()
         models["transformer"] = (transformer, tokenizer)
     except Exception as e:
-        st.warning(f"[WARN] Could not load fine-tuned Transformer checkpoint: {e}")
+        st.warning(f"[WARN] Could not load Hugging Face model: {e}")
         tokenizer = AutoTokenizer.from_pretrained("distilroberta-base")
         transformer = AutoModelForSequenceClassification.from_pretrained("distilroberta-base", num_labels=2).to(DEVICE)
         transformer.eval()
@@ -97,7 +102,9 @@ def load_models(lang):
 
     return models
 
-# -------------------- UI --------------------
+# ----------------------------------------------------------
+# UI
+# ----------------------------------------------------------
 lang = st.selectbox("🌐 Select Language", ["python", "java", "javascript", "all"])
 
 code_sample = {
@@ -123,35 +130,37 @@ code_sample = {
 code_input = st.text_area("✍️ Paste or edit your code snippet:", code_sample[lang], height=200)
 models = load_models(lang)
 
-# -------------------- RUN INFERENCE --------------------
+# ----------------------------------------------------------
+# RUN INFERENCE
+# ----------------------------------------------------------
 if st.button("🔎 Segment Code"):
     st.write(f"### 🧠 Model Predictions for *{lang.upper()}*")
     x = char_tensor(code_input)
 
     col1, col2 = st.columns(2)
 
-    # ---- BiLSTM Centered ----
+    # BiLSTM Centered
     if models["bilstm_centered"]:
         with torch.no_grad():
             probs_centered = torch.sigmoid(models["bilstm_centered"](x).squeeze().cpu()).numpy()
         col1.markdown("**BiLSTM (Centered)**")
         col1.markdown(highlight_segments(code_input, probs_centered), unsafe_allow_html=True)
 
-    # ---- BiLSTM Uncentered ----
+    # BiLSTM Uncentered
     if models["bilstm_uncentered"]:
         with torch.no_grad():
             probs_unc = torch.sigmoid(models["bilstm_uncentered"](x).squeeze().cpu()).numpy()
         col2.markdown("**BiLSTM (Uncentered)**")
         col2.markdown(highlight_segments(code_input, probs_unc), unsafe_allow_html=True)
 
-    # ---- CNN-BiLSTM ----
+    # CNN-BiLSTM
     if models["cnn_bilstm"]:
         with torch.no_grad():
             probs_cnn_bilstm = torch.sigmoid(models["cnn_bilstm"](x).squeeze().cpu()).numpy()
         st.markdown("**CNN-BiLSTM (Hybrid)**")
         st.markdown(highlight_segments(code_input, probs_cnn_bilstm), unsafe_allow_html=True)
 
-    # ---- Transformer ----
+    # Transformer
     transformer, tokenizer = models["transformer"]
     inputs = tokenizer(code_input, truncation=True, padding=True, return_tensors="pt").to(DEVICE)
     with torch.no_grad():
@@ -159,11 +168,13 @@ if st.button("🔎 Segment Code"):
         pred = torch.argmax(torch.softmax(logits, dim=-1), dim=-1).cpu().item()
         confidence = torch.softmax(logits, dim=-1).max().cpu().item()
     st.markdown("**Transformer (Fine-tuned DistilRoBERTa)**")
-    st.write(f"Predicted class → `{pred}`  Confidence → `{confidence:.3f}`")
+    st.write(f"Predicted class → `{pred}` Confidence → `{confidence:.3f}`")
 
     st.caption("🟨 Highlighted regions indicate where each model predicts likely code segment boundaries.")
 
-# -------------------- SIDEBAR --------------------
+# ----------------------------------------------------------
+# SIDEBAR
+# ----------------------------------------------------------
 st.sidebar.header("⚙️ Model Info")
 st.sidebar.write("""
 **Included Models**
@@ -173,4 +184,4 @@ st.sidebar.write("""
 - Transformer (Fine-tuned DistilRoBERTa)
 """)
 st.sidebar.write(f"Device: **{DEVICE}**")
-st.sidebar.write("Language selected: **" + lang.upper() + "**")
+st.sidebar.write(f"Language selected: **{lang.upper()}**")
