@@ -4,3 +4,4 @@ transformers
 joblib
 numpy
 huggingface_hub
+scikit-learn
