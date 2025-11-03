@@ -13,7 +13,7 @@ import torch, joblib, numpy as np, os
 # -------------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-LANGS = ["python", "java", "javascript", "multilanguage_all"]
+LANGS = ["python", "java", "javascript", "all"]
 MODELS = {
     "BoC": "runs/lr_boc",
     "BiLSTM (Uncentered)": "runs/lstm_uncentered",
