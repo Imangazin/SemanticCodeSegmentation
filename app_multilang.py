@@ -1,138 +1,171 @@
 #!/usr/bin/env python3
 """
-Interactive Streamlit app for multi-language code segmentation
-
-Includes:
-- BoC (Logistic Regression)
-- BiLSTM (Centered / Uncentered)
-- CNN-BiLSTM (Hybrid)
+Streamlit App: Multi-Language Code Segmentation
+Supports: BoC, BiLSTM, CNN, CNN-BiLSTM
+Author: Nurbek Imangazin
 """
 
-import os, torch, joblib, numpy as np, streamlit as st
+import streamlit as st
+import torch, joblib, numpy as np, os
 
+# -------------------------------------------------------
+# 🧩 CONFIG
+# -------------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-st.set_page_config(page_title="Code Segmentation Demo", layout="wide")
-st.title("🔍 Multi-language Code Segmentation Comparison")
-
-# ----------------------------------------------------------
-# Helper functions
-# ----------------------------------------------------------
-def highlight_segments(code, probs, threshold=0.5):
-    """Return HTML string with highlighted predicted boundaries."""
-    html = ""
-    for i, ch in enumerate(code):
-        if i < len(probs) and probs[i] > threshold:
-            html += f"<span style='background-color:#ffd54f'>{ch}</span>"
-        else:
-            html += ch
-    return html.replace("\n", "<br>")
-
-def char_tensor(code):
-    """Convert text to tensor."""
-    return torch.tensor([ord(c) if ord(c) < 256 else 0 for c in code],
-                        dtype=torch.long).unsqueeze(0).to(DEVICE)
-
-@st.cache_resource
-def load_model(lang, model_name):
-    """Load a specific model for a given language."""
-    suffix = lang.lower()
-    model = None
-
-    try:
-        if model_name == "BoC":
-            path = f"runs/lr_boc/lr_{suffix}.joblib"
-            model = joblib.load(path) if os.path.exists(path) else None
-
-        elif model_name == "BiLSTM (Centered)":
-            from train_lstm_centered import BiLSTMCentered
-            m = BiLSTMCentered().to(DEVICE)
-            m.load_state_dict(torch.load(f"runs/lstm_centered/lstm_centered_{suffix}.pt", map_location=DEVICE))
-            m.eval()
-            model = m
-
-        elif model_name == "BiLSTM (Uncentered)":
-            from train_lstm_uncentered import BiLSTM
-            m = BiLSTM().to(DEVICE)
-            m.load_state_dict(torch.load(f"runs/lstm_uncentered/lstm_uncentered_{suffix}.pt", map_location=DEVICE))
-            m.eval()
-            model = m
-
-        elif model_name == "CNN-BiLSTM (Hybrid)":
-            from train_cnn_bilstm_uncentered_v3 import CNNBiLSTM
-            m = CNNBiLSTM().to(DEVICE)
-            m.load_state_dict(torch.load(f"runs/cnn_bilstm_uncentered_v3/cnn_bilstm_uncentered_{suffix}.pt", map_location=DEVICE))
-            m.eval()
-            model = m
-
-    except Exception as e:
-        st.warning(f"⚠️ Could not load {model_name} for {lang}: {e}")
-        model = None
-
-    return model
-
-
-# ----------------------------------------------------------
-# UI
-# ----------------------------------------------------------
-st.sidebar.header("⚙️ Settings")
-
-lang = st.sidebar.selectbox("🌐 Language", ["python", "java", "javascript", "all"])
-model_choice = st.sidebar.selectbox("🧠 Model", [
-    "BoC",
-    "BiLSTM (Centered)",
-    "BiLSTM (Uncentered)",
-    "CNN-BiLSTM (Hybrid)"
-])
-
-st.sidebar.write(f"Device: **{DEVICE}**")
-
-# ----------------------------------------------------------
-# Sample inputs
-# ----------------------------------------------------------
-samples = {
-    "python": """def compute_sum(a, b):
-    total = a + b
-    print('Result:', total)
-    return total
-""",
-    "java": """public class Example {
-    public static void main(String[] args) {
-        int total = add(5, 7);
-        System.out.println(total);
-    }
-}""",
-    "javascript": """function add(a, b) {
-  let total = a + b;
-  console.log(total);
-  return total;
-}""",
-    "all": """def mix_code(a, b): return a + b // generic sample"""
+LANGS = ["python", "java", "javascript", "multilanguage_all"]
+MODELS = {
+    "BoC": "runs/lr_boc",
+    "BiLSTM (Uncentered)": "runs/lstm_uncentered",
+    "BiLSTM (Centered)": "runs/lstm_centered",
+    "CNN (Uncentered)": "runs/cnn_uncentered",
+    "CNN-BiLSTM (Uncentered)": "runs/cnn_bilstm_uncentered_v3",
 }
 
-code_input = st.text_area("✍️ Paste or edit code snippet:", samples[lang], height=200)
+st.set_page_config(page_title="Semantic Code Segmentation", layout="wide")
+st.title("🧠 Semantic Code Segmentation")
+st.markdown("Select a language and model to segment your code automatically.")
 
-# ----------------------------------------------------------
-# Load and run
-# ----------------------------------------------------------
-model = load_model(lang, model_choice)
+# -------------------------------------------------------
+# 📦 MODEL LOADER
+# -------------------------------------------------------
+@st.cache_resource
+def load_model(model_type, lang):
+    """Load model safely depending on type."""
+    try:
+        if model_type == "BoC":
+            model_path = os.path.join(MODELS["BoC"], f"lr_{lang}.joblib")
+            if os.path.exists(model_path):
+                model = joblib.load(model_path)
+                return model, "BoC"
+            else:
+                st.warning(f"⚠️ Missing BoC model for {lang}.")
+                return None, "BoC"
+
+        elif "lstm_uncentered" in MODELS["BiLSTM (Uncentered)"]:
+            from train_lstm_uncentered import BiLSTM
+            model_path = os.path.join(MODELS["BiLSTM (Uncentered)"], f"lstm_uncentered_{lang}.pt")
+            if os.path.exists(model_path):
+                model = BiLSTM().to(DEVICE)
+                model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                model.eval()
+                return model, "BiLSTM (Uncentered)"
+            else:
+                st.warning(f"⚠️ Missing BiLSTM (Uncentered) for {lang}.")
+                return None, "BiLSTM (Uncentered)"
+
+        elif "lstm_centered" in MODELS["BiLSTM (Centered)"]:
+            from train_lstm_centered import BiLSTMCentered
+            model_path = os.path.join(MODELS["BiLSTM (Centered)"], f"lstm_centered_{lang}.pt")
+            if os.path.exists(model_path):
+                model = BiLSTMCentered().to(DEVICE)
+                model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                model.eval()
+                return model, "BiLSTM (Centered)"
+            else:
+                st.warning(f"⚠️ Missing BiLSTM (Centered) for {lang}.")
+                return None, "BiLSTM (Centered)"
+
+        elif "cnn_uncentered" in MODELS["CNN (Uncentered)"]:
+            from train_cnn_uncentered import CharCNN
+            model_path = os.path.join(MODELS["CNN (Uncentered)"], f"cnn_uncentered_{lang}.pt")
+            if os.path.exists(model_path):
+                model = CharCNN().to(DEVICE)
+                model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                model.eval()
+                return model, "CNN (Uncentered)"
+            else:
+                st.warning(f"⚠️ Missing CNN (Uncentered) for {lang}.")
+                return None, "CNN (Uncentered)"
+
+        elif "cnn_bilstm" in MODELS["CNN-BiLSTM (Uncentered)"]:
+            from train_cnn_bilstm_uncentered_v3 import CNNBiLSTM
+            model_path = os.path.join(MODELS["CNN-BiLSTM (Uncentered)"], f"cnn_bilstm_uncentered_{lang}.pt")
+            if os.path.exists(model_path):
+                model = CNNBiLSTM().to(DEVICE)
+                model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+                model.eval()
+                return model, "CNN-BiLSTM (Uncentered)"
+            else:
+                st.warning(f"⚠️ Missing CNN-BiLSTM (Uncentered) for {lang}.")
+                return None, "CNN-BiLSTM (Uncentered)"
+
+    except Exception as e:
+        st.error(f"⚠️ Could not load {model_type} for {lang}: {e}")
+        return None, model_type
+
+
+# -------------------------------------------------------
+# 🔧 SAFE PREDICTION FUNCTION
+# -------------------------------------------------------
+def get_predictions(model, model_type, code_snippet, device="cpu"):
+    """Return predictions safely for any model type."""
+    if model is None:
+        raise ValueError("Model not loaded.")
+
+    # --- BoC model (scikit-learn) ---
+    if model_type.lower().startswith("boc"):
+        X = np.array([[ord(c) / 255.0 for c in code_snippet]])
+        try:
+            probs = model.predict_proba(X)[0][1]
+        except AttributeError:
+            probs = model.predict(X)[0]
+        return float(probs)
+
+    # --- PyTorch models (LSTM/CNN/CNN-BiLSTM) ---
+    elif any(k in model_type.lower() for k in ["lstm", "cnn"]):
+        x = torch.tensor(
+            [ord(c) if ord(c) < 256 else 0 for c in code_snippet],
+            dtype=torch.long
+        ).unsqueeze(0).to(device)
+        with torch.no_grad():
+            logits = model(x).squeeze().cpu()
+            probs = torch.sigmoid(logits).numpy()
+        return float(probs) if np.isscalar(probs) or probs.size == 1 else probs.tolist()
+
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+
+# -------------------------------------------------------
+# 🖥️ UI
+# -------------------------------------------------------
+col1, col2 = st.columns(2)
+with col1:
+    selected_lang = st.selectbox("Select Programming Language", LANGS)
+with col2:
+    model_type = st.selectbox("Select Model", list(MODELS.keys()))
+
+code_input = st.text_area("Paste your code here:", height=250, placeholder="def example():\n    print('Hello World')")
 
 if st.button("🔎 Segment Code"):
-    if not model:
-        st.error(f"Model `{model_choice}` not available for {lang.upper()}.")
+    with st.spinner(f"Loading {model_type} model for {selected_lang}..."):
+        model, mtype = load_model(model_type, selected_lang)
+
+    if model is None:
+        st.error(f"❌ {model_type} model not found for {selected_lang}.")
     else:
-        st.subheader(f"🧩 Predictions — {model_choice} ({lang.upper()})")
+        with st.spinner(f"Running {mtype} segmentation..."):
+            try:
+                probs = get_predictions(model, mtype, code_input, DEVICE)
 
-        x = char_tensor(code_input)
-        with torch.no_grad():
-            probs = torch.sigmoid(model(x).squeeze().cpu()).numpy()
+                if isinstance(probs, list):
+                    segmented = "".join([
+                        c + ("\n" if p > 0.5 else "")
+                        for c, p in zip(code_input, probs)
+                    ])
+                else:
+                    segmented = code_input if probs < 0.5 else f"{code_input}\n# Segment"
 
-        st.markdown(highlight_segments(code_input, probs), unsafe_allow_html=True)
-        st.caption("🟨 Highlighted areas = likely code segment boundaries.")
+                st.success("✅ Segmentation complete!")
+                st.code(segmented, language=selected_lang.lower())
 
+            except Exception as e:
+                st.error(f"⚠️ Error while segmenting code: {e}")
 
-# ----------------------------------------------------------
-# Footer
-# ----------------------------------------------------------
+# -------------------------------------------------------
+# 🔍 Notes
+# -------------------------------------------------------
 st.markdown("---")
-st.caption("© 2025 Semantic Code Segmentation — Demo app for academic presentation.")
+st.caption("🧠 Models: BoC (Logistic Regression), BiLSTM, CNN, CNN-BiLSTM")
+st.caption("📊 Device used: **" + DEVICE + "**")
