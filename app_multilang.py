@@ -155,6 +155,8 @@ code_input = st.text_area(
 )
 
 if st.button("🔎 Segment Code"):
+    threshold = st.slider("Segmentation threshold", 0.0, 1.0, 0.5, 0.05)
+
     with st.spinner(f"Loading {model_type} model for {selected_lang}..."):
         model, mtype = load_model(model_type, selected_lang)
 
@@ -164,17 +166,23 @@ if st.button("🔎 Segment Code"):
         with st.spinner(f"Running {mtype} segmentation..."):
             try:
                 probs = get_predictions(model, mtype, code_input, DEVICE)
-                segmented = "".join([
-                    c + ("\n" if p > 0.5 else "")
-                    for c, p in zip(code_input, probs)
-                ])
+                if not isinstance(probs, list):
+                    probs = [float(probs)] * len(code_input)
+
+                # Create visual segmentation (HTML)
+                html_output = ""
+                for c, p in zip(code_input, probs):
+                    color = "rgba(255,255,0,0.3)" if p > threshold else "transparent"
+                    html_output += f"<span style='background-color:{color}'>{c}</span>"
 
                 st.success("✅ Segmentation complete!")
-                st.code(segmented, language=selected_lang.lower())
+                st.markdown(
+                    f"<pre style='background:#f8f9fa;padding:10px;border-radius:8px;'>{html_output}</pre>",
+                    unsafe_allow_html=True,
+                )
 
             except Exception as e:
                 st.error(f"⚠️ Error while segmenting code: {e}")
-
 # -------------------------------------------------------
 # 🔍 Notes
 # -------------------------------------------------------
