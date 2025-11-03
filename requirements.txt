@@ -2,3 +2,5 @@ streamlit
 torch
 transformers
 joblib
+numpy
+huggingface_hub
