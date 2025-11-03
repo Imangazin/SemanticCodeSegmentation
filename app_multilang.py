@@ -181,7 +181,8 @@ if st.button("🔎 Segment Code"):
                 # -------------------------------------------------
 
                 st.success("✅ Segmentation complete!")
-                st.code(segmented, language=selected_lang.lower())
+                st.text(segmented)
+                #st.code(segmented, language=selected_lang.lower())
 
             except Exception as e:
                 st.error(f"⚠️ Error while segmenting code: {e}")
