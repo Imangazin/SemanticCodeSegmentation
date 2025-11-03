@@ -110,7 +110,6 @@ def get_predictions(model, model_type, code_snippet, device="cpu"):
             probs = model.predict_proba(X)[0][1]
         except AttributeError:
             probs = model.predict(X)[0]
-        # Repeat same probability per character
         return [float(probs)] * len(code_snippet)
 
     # --- PyTorch models (LSTM/CNN/CNN-BiLSTM) ---
@@ -133,10 +132,11 @@ def get_predictions(model, model_type, code_snippet, device="cpu"):
         # Optional smoothing for stability
         window = 3
         smoothed = np.convolve(probs, np.ones(window) / window, mode="same")
+
         # Prevent flat predictions (demo fallback)
         if max(smoothed) - min(smoothed) < 0.05:
             for i in range(5, len(smoothed), 10):
-                smoothed[i] = 0.9  # simulate boundary every ~10 chars
+                smoothed[i] = 0.9
         return smoothed.tolist()
 
     else:
@@ -144,7 +144,7 @@ def get_predictions(model, model_type, code_snippet, device="cpu"):
 
 
 # -------------------------------------------------------
-# 🖥️ UI
+# 🖥️ STREAMLIT UI
 # -------------------------------------------------------
 col1, col2 = st.columns(2)
 with col1:
@@ -158,9 +158,9 @@ code_input = st.text_area(
     placeholder="def example():\n    print('Hello World')"
 )
 
-if st.button("🔎 Segment Code"):
-    threshold = st.slider("Segmentation threshold", 0.0, 1.0, 0.5, 0.05)
+threshold = st.slider("Segmentation threshold", 0.0, 1.0, 0.5, 0.05)
 
+if st.button("🔎 Segment Code"):
     with st.spinner(f"Loading {model_type} model for {selected_lang}..."):
         model, mtype = load_model(model_type, selected_lang)
 
@@ -173,20 +173,19 @@ if st.button("🔎 Segment Code"):
                 if not isinstance(probs, list):
                     probs = [float(probs)] * len(code_input)
 
-                # Create visual segmentation (HTML)
-                html_output = ""
-                for c, p in zip(code_input, probs):
-                    color = "rgba(255,255,0,0.3)" if p > threshold else "transparent"
-                    html_output += f"<span style='background-color:{color}'>{c}</span>"
+                # ------------------ ADD DIVIDER ------------------
+                segmented = "".join(
+                    c + ("\n-----------------div----------------\n" if p > threshold else "")
+                    for c, p in zip(code_input, probs)
+                )
+                # -------------------------------------------------
 
                 st.success("✅ Segmentation complete!")
-                st.markdown(
-                    f"<pre style='background:#f8f9fa;padding:10px;border-radius:8px;'>{html_output}</pre>",
-                    unsafe_allow_html=True,
-                )
+                st.code(segmented, language=selected_lang.lower())
 
             except Exception as e:
                 st.error(f"⚠️ Error while segmenting code: {e}")
+
 # -------------------------------------------------------
 # 🔍 Notes
 # -------------------------------------------------------
