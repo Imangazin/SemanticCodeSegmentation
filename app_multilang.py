@@ -96,10 +96,10 @@ def load_model(model_type, lang):
 
 
 # -------------------------------------------------------
-# 🔧 SAFE PREDICTION FUNCTION
+# 🔧 PREDICTION FUNCTION (FIXED)
 # -------------------------------------------------------
 def get_predictions(model, model_type, code_snippet, device="cpu"):
-    """Return predictions safely for any model type."""
+    """Return per-character probabilities for segmentation."""
     if model is None:
         raise ValueError("Model not loaded.")
 
@@ -110,18 +110,30 @@ def get_predictions(model, model_type, code_snippet, device="cpu"):
             probs = model.predict_proba(X)[0][1]
         except AttributeError:
             probs = model.predict(X)[0]
-        return float(probs)
+        # Repeat same probability per character
+        return [float(probs)] * len(code_snippet)
 
     # --- PyTorch models (LSTM/CNN/CNN-BiLSTM) ---
     elif any(k in model_type.lower() for k in ["lstm", "cnn"]):
-        x = torch.tensor(
-            [ord(c) if ord(c) < 256 else 0 for c in code_snippet],
-            dtype=torch.long
-        ).unsqueeze(0).to(device)
+        seq = [ord(c) if ord(c) < 256 else 0 for c in code_snippet]
+        x = torch.tensor(seq, dtype=torch.long).unsqueeze(0).to(device)
+
         with torch.no_grad():
             logits = model(x).squeeze().cpu()
             probs = torch.sigmoid(logits).numpy()
-        return float(probs) if np.isscalar(probs) or probs.size == 1 else probs.tolist()
+
+        # Ensure it’s per-character
+        if np.isscalar(probs):
+            probs = [float(probs)] * len(code_snippet)
+        elif len(probs) != len(code_snippet):
+            probs = np.resize(probs, len(code_snippet)).tolist()
+        else:
+            probs = probs.tolist()
+
+        # Optional smoothing for stability
+        window = 3
+        smoothed = np.convolve(probs, np.ones(window) / window, mode="same")
+        return smoothed.tolist()
 
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
@@ -136,7 +148,11 @@ with col1:
 with col2:
     model_type = st.selectbox("Select Model", list(MODELS.keys()))
 
-code_input = st.text_area("Paste your code here:", height=250, placeholder="def example():\n    print('Hello World')")
+code_input = st.text_area(
+    "Paste your code here:",
+    height=250,
+    placeholder="def example():\n    print('Hello World')"
+)
 
 if st.button("🔎 Segment Code"):
     with st.spinner(f"Loading {model_type} model for {selected_lang}..."):
@@ -148,14 +164,10 @@ if st.button("🔎 Segment Code"):
         with st.spinner(f"Running {mtype} segmentation..."):
             try:
                 probs = get_predictions(model, mtype, code_input, DEVICE)
-
-                if isinstance(probs, list):
-                    segmented = "".join([
-                        c + ("\n" if p > 0.5 else "")
-                        for c, p in zip(code_input, probs)
-                    ])
-                else:
-                    segmented = code_input if probs < 0.5 else f"{code_input}\n# Segment"
+                segmented = "".join([
+                    c + ("\n" if p > 0.5 else "")
+                    for c, p in zip(code_input, probs)
+                ])
 
                 st.success("✅ Segmentation complete!")
                 st.code(segmented, language=selected_lang.lower())
